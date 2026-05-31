@@ -100,8 +100,7 @@ def process_and_save_job(title: str, company: str, link: str, description: str):
         sheets_client = get_google_sheets_client()
         spreadsheet = sheets_client.open("jobs").sheet1
         
-        # 4. Prepare the row data based on our columns:
-        # Date | Title | Company | Link | Score | Status | Adapted_Summary | Adapted_Skills
+        # 4. Prepare the row data
         current_date = datetime.now().strftime("%d/%m/%Y %H:%M")
         
         row_data = [
@@ -110,7 +109,7 @@ def process_and_save_job(title: str, company: str, link: str, description: str):
             company,
             link,
             int(analysis.get("score")),
-            "Pending", # It stays 'Pending' until the daily report script sends the email
+            "Pending",
             analysis.get("adapted_summary"),
             analysis.get("adapted_skills")
         ]
@@ -120,9 +119,13 @@ def process_and_save_job(title: str, company: str, link: str, description: str):
         print("💾 Data successfully saved to Google Sheets!")
         
     except Exception as e:
-        print(f"⚠️ An error occurred while processing the job: {e}")
-        print("\n🔍 Error Details (Traceback):")
-        traceback.print_exc()
+        # 🎯 CAPTURE RATE LIMITS SMOOTHLY WITHOUT CRASHING THE WHOLE WORKFLOW
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            print("⏳ [Rate Limit] Gemini API free tier limit reached. Skipping this position to avoid crash...")
+        else:
+            print(f"⚠️ An error occurred while processing the job: {e}")
+            print("\n🔍 Error Details (Traceback):")
+            traceback.print_exc()
 
 # =====================================================================
 # TESTING EXECUTION
