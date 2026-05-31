@@ -1,18 +1,11 @@
 import os
 import json
+from datetime import datetime
 import traceback
 import gspread
-from datetime import datetime
 from google.oauth2.service_account import Credentials
 from google import genai
 from google.genai import types
-
-# =====================================================================
-# CONFIGURATION & INITIALIZATION
-# =====================================================================
-
-# Initialize the Gemini Client
-gemini_client = genai.Client()
 
 def get_google_sheets_client():
     """Authenticates with Google API using the JSON string from environment variables or local file."""
@@ -21,127 +14,102 @@ def get_google_sheets_client():
         "https://www.googleapis.com/auth/drive"
     ]
     
-    # 1. Check if running on GitHub Actions (via env variable)
     json_env = os.environ.get("GOOGLE_CREDENTIALS_JSON")
     
     if json_env:
-        # Load credentials directly from the environment string
         info = json.loads(json_env)
         credentials = Credentials.from_service_account_info(info, scopes=scopes)
     else:
-        # Fallback to local file for development
         credentials_path = "google_credentials.json"
         credentials = Credentials.from_service_account_file(credentials_path, scopes=scopes)
         
     return gspread.authorize(credentials)
 
-# =====================================================================
-# CORE LOGIC FUNCTIONS
-# =====================================================================
-
 def analyze_job_position(title: str, description: str) -> dict:
-    """Sends job details to Gemini API and returns a structured match analysis."""
+    """Analyzes the job description against Gabriel's profile using Gemini 2.5 Flash."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("⚠️ GEMINI_API_KEY environment variable not found.")
+        
+    gemini_client = genai.Client(api_key=api_key)
     
     prompt = f"""
-    Você é um recrutador técnico especialista em sistemas de triagem de currículos (ATS).
-    Avalie a vaga abaixo em relação ao currículo do candidato Gabriel Leitão.
+    Você é um especialista em recrutamento técnico e ATS. Analise a vaga abaixo e compare com o perfil do Gabriel (Desenvolvedor Fullstack Node/TS/Python).
     
-    FOCO DO CANDIDATO: Vagas de nível JÚNIOR.
-    
-    VAGA ENCONTRADA:
-    Título: {title}
-    Descrição: {description}
-    
-    INSTRUÇÕES CRÍTICAS:
-    1. Se a vaga exigir senioridade avançada (Pleno, Sênior, Specialist, Lead) ou mais de 4-5 anos de experiência obrigatória, a nota deve ser baixa e o campo 'is_valid_match' deve ser obrigatoriamente FALSE. Foque estritamente em vagas compatíveis com nível Júnior.
-    2. Calcule uma nota de match de 0 a 100 baseada puramente nos requisitos técnicos da vaga e na experiência de 3 anos do Gabriel.
-    3. Se a nota for maior ou igual a 75 (e for uma vaga adequada para nível júnior), reescreva o "Resumo Profissional" e reordene as "Habilidades Técnicas" do Gabriel para dar ênfase máxima ao que a vaga pede (seja Java, Python, Node, Next.js, etc).
-    4. Mantenha os textos gerados (justificativa, resumo e skills) em PORTUGUÊS.
-    5. NÃO invente mentiras ou experiências que ele não tem. Apenas mude a ênfase para destacar as tecnologias da vaga que ele já domina ou os conceitos correlacionados.
+    Vaga: {title}
+    Descrição Bruta: {description}
+
+    Gere uma resposta estritamente em formato JSON com os seguintes campos:
+    - is_valid_match (boolean): true se for uma vaga Júnior relevante para o perfil do Gabriel.
+    - score (int): nota de compatibilidade de 0 a 100.
+    - adapted_summary (string): O resumo profissional do Gabriel adaptado para esta vaga.
+    - adapted_skills (string): As palavras-chave de tecnologia separadas por vírgula para passar no ATS.
+    - job_requirements (string): Um resumo curto e direto (em até 4 tópicos com bullet points) dos requisitos técnicos reais exigidos pela vaga.
+    - tailored_experiences (string): Gere de 3 a 4 bullet points profissionais prontos, simulando as experiências anteriores do Gabriel, mas usando os termos e conquistas que dão mais match com os requisitos dessa vaga específica.
     """
 
-    print(f"🤖 Analyzing job position with Gemini: {title}...")
+    # Definindo o esquema de validação estrito para o Gemini não errar o JSON
+    response_schema = {
+        "type": "OBJECT",
+        "properties": {
+            "is_valid_match": {"type": "BOOLEAN"},
+            "score": {"type": "INTEGER"},
+            "adapted_summary": {"type": "STRING"},
+            "adapted_skills": {"type": "STRING"},
+            "job_requirements": {"type": "STRING"},
+            "tailored_experiences": {"type": "STRING"}
+        },
+        "required": ["is_valid_match", "score", "adapted_summary", "adapted_skills", "job_requirements", "tailored_experiences"]
+    }
 
     response = gemini_client.models.generate_content(
         model='gemini-2.5-flash',
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            response_schema=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "is_valid_match": types.Schema(type=types.Type.BOOLEAN),
-                    "score": types.Schema(type=types.Type.INTEGER),
-                    "justification": types.Schema(type=types.Type.STRING),
-                    "adapted_summary": types.Schema(type=types.Type.STRING),
-                    "adapted_skills": types.Schema(type=types.Type.STRING)
-                },
-                required=["is_valid_match", "score", "justification", "adapted_summary", "adapted_skills"]
-            )
-        )
+            response_schema=response_schema,
+            temperature=0.3
+        ),
     )
+    
     return json.loads(response.text)
-
 
 def process_and_save_job(title: str, company: str, link: str, description: str):
     """Analyzes the job and saves the data into Google Sheets if it's a good match."""
     try:
-        # 1. Run the Gemini analysis
         analysis = analyze_job_position(title, description)
         
-        # 2. Check if the job matches our Junior criteria
-        if not analysis.get("is_valid_match"):
-            print(f"❌ Job skipped (Low match score or wrong seniority). Score: {analysis.get('score')}")
+        if not analysis.get("is_valid_match") or analysis.get("score", 0) < 70:
+            print(f"❌ Job skipped (Low match score or wrong seniority). Score: {analysis.get('score')}%")
             return
 
-        print(f"🎯 Great match found! Score: {analysis.get('score')}. Connecting to Google Sheets...")
+        print(f"🎯 Great match found! Score: {analysis.get('score')}%. Connecting to Google Sheets...")
         
-        # 3. Connect to the spreadsheet
         sheets_client = get_google_sheets_client()
         spreadsheet = sheets_client.open("jobs").sheet1
         
-        # 4. Prepare the row data
         current_date = datetime.now().strftime("%d/%m/%Y %H:%M")
         
+        # Mapeamento exato batendo com as colunas A até J da sua planilha
         row_data = [
-            current_date,
-            title,
-            company,
-            link,
-            int(analysis.get("score")),
-            "Pending",
-            analysis.get("adapted_summary"),
-            analysis.get("adapted_skills")
+            current_date,                         # A: Date
+            title,                                # B: Title
+            company,                              # C: Company
+            link,                                 # D: Link
+            int(analysis.get("score")),           # E: Score
+            "Pending",                            # F: Status
+            analysis.get("adapted_summary"),      # G: Adapted_Summary
+            analysis.get("adapted_skills"),       # H: Adapted_Skills
+            analysis.get("job_requirements"),     # I: Job_Requirements (Nova)
+            analysis.get("tailored_experiences")  # J: Tailored_Experiences (Nova)
         ]
         
-        # 5. Append the new row to the sheet
         spreadsheet.append_row(row_data, value_input_option="USER_ENTERED")
         print("💾 Data successfully saved to Google Sheets!")
         
     except Exception as e:
-        # 🎯 CAPTURE RATE LIMITS SMOOTHLY WITHOUT CRASHING THE WHOLE WORKFLOW
         if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            print("⏳ [Rate Limit] Gemini API free tier limit reached. Skipping this position to avoid crash...")
+            print("⏳ [Rate Limit] Gemini API free tier limit reached. Skipping position to avoid crash...")
         else:
             print(f"⚠️ An error occurred while processing the job: {e}")
-            print("\n🔍 Error Details (Traceback):")
             traceback.print_exc()
-
-# =====================================================================
-# TESTING EXECUTION
-# =====================================================================
-if __name__ == "__main__":
-    mock_title = "Developer Java Júnior (Spring Boot)"
-    mock_company = "Sensedia"
-    mock_link = "https://linkedin.com/jobs/view/test-junior-java-123"
-    mock_description = """
-    Estamos buscando um Dev Júnior apaixonado por tecnologia para integrar nosso time de engenharia.
-    Você vai trabalhar criando APIs utilizando Java e Spring Boot.
-    Requisitos:
-    - Conhecimento em orientação a objetos com Java.
-    - Noções de bancos de dados relacionais.
-    - Noções de Docker.
-    Oferecemos suporte e mentorias para acelerar sua carreira!
-    """
-    
-    process_and_save_job(mock_title, mock_company, mock_link, mock_description)

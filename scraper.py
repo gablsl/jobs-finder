@@ -1,12 +1,9 @@
 import time
-import os
-import json
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import gspread
-from google.oauth2.service_account import Credentials
 
-# Importa a função do seu arquivo main.py
+# Importações do main
 from main import process_and_save_job, get_google_sheets_client
 
 def get_already_processed_links():
@@ -16,22 +13,23 @@ def get_already_processed_links():
         sheets_client = get_google_sheets_client()
         spreadsheet = sheets_client.open("jobs").sheet1
         
-        # col_values(4) grabs the 4th column (Link)
-        # If the sheet is empty, it returns an empty list
+        # Coluna D (4) é a coluna de links na sua planilha
         links = spreadsheet.col_values(4)
+        # Remove o cabeçalho "Link" se ele existir
+        if links and links[0] == "Link":
+            links.pop(0)
+            
         print(f"📁 Found {len(links)} links already stored in your Google Sheets.")
         return links
     except Exception as e:
-        print(f"⚠️ Warning: Could not read Google Sheets ({e}). Proceeding without cache history.")
+        print(f"⚠️ Warning: Could not read Google Sheets ({e}). Proceeding without history.")
         return []
 
 def fetch_remotar_junior_jobs():
     """Scrapes junior tech jobs using Playwright and processes only NEW positions."""
     url = "https://remotar.com.br/search/jobs?q=&c=13&t=17"
     
-    # 🎯 STEP 1: Fetch links that are already in the spreadsheet
     existing_links = get_already_processed_links()
-    
     print(f"\n🌐 Opening Remotar with Playwright: {url}...")
     
     with sync_playwright() as p:
@@ -40,7 +38,6 @@ def fetch_remotar_junior_jobs():
         
         try:
             page.goto(url, wait_until="networkidle", timeout=30000)
-            
             print("⏳ Waiting for job cards to load...")
             page.wait_for_selector("a.job-title", timeout=10000)
             
@@ -50,7 +47,6 @@ def fetch_remotar_junior_jobs():
             job_elements = soup.find_all('a', class_='job-title')
             print(f"🎯 Found {len(job_elements)} raw job elements on the page.")
             
-            # Organize raw jobs from page
             job_list = []
             for element in job_elements:
                 link = element.get('href')
@@ -63,11 +59,9 @@ def fetch_remotar_junior_jobs():
             
             processed_count = 0
             
-            # Varre as vagas encontradas
             for job in job_list:
-                # 🎯 STEP 2: CHECK IF THE JOB IS ALREADY IN THE SHEET
                 if job['link'] in existing_links:
-                    print(f"⏭️ Skipping (Already Processed): {job['title']}")
+                    print(f"固定 Skipping (Already Processed): {job['title']}")
                     continue
                 
                 print(f"\n🟢 New Job Found! Navigating to details: {job['title']}")
@@ -85,7 +79,6 @@ def fetch_remotar_junior_jobs():
                     if 'na empresa' in meta_text:
                         company = meta_text.split('na empresa')[-1].strip().split('.')[0]
                 
-                # Sends ONLY fresh new jobs to Gemini + Sheets
                 process_and_save_job(
                     title=job['title'],
                     company=company,
@@ -101,7 +94,6 @@ def fetch_remotar_junior_jobs():
             
         except Exception as e:
             print(f"⚠️ An error occurred during page processing: {e}")
-            
         finally:
             browser.close()
 
