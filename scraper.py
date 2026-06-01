@@ -1,9 +1,6 @@
 import time
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-import gspread
-
-# Importações do main
 from main import process_and_save_job, get_google_sheets_client
 
 def get_already_processed_links():
@@ -12,13 +9,9 @@ def get_already_processed_links():
         print("📊 Connecting to Google Sheets to check existing jobs...")
         sheets_client = get_google_sheets_client()
         spreadsheet = sheets_client.open("jobs").sheet1
-        
-        # Coluna D (4) é a coluna de links na sua planilha
         links = spreadsheet.col_values(4)
-        # Remove o cabeçalho "Link" se ele existir
         if links and links[0] == "Link":
             links.pop(0)
-            
         print(f"📁 Found {len(links)} links already stored in your Google Sheets.")
         return links
     except Exception as e:
@@ -27,8 +20,8 @@ def get_already_processed_links():
 
 def fetch_remotar_junior_jobs():
     """Scrapes junior tech jobs using Playwright and processes only NEW positions."""
+    # URL configured to show only junior positions in the tech category on Remotar website
     url = "https://remotar.com.br/search/jobs?q=&c=13&t=17"
-    
     existing_links = get_already_processed_links()
     print(f"\n🌐 Opening Remotar with Playwright: {url}...")
     
@@ -43,7 +36,6 @@ def fetch_remotar_junior_jobs():
             
             html_content = page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
-            
             job_elements = soup.find_all('a', class_='job-title')
             print(f"🎯 Found {len(job_elements)} raw job elements on the page.")
             
@@ -61,18 +53,23 @@ def fetch_remotar_junior_jobs():
             
             for job in job_list:
                 if job['link'] in existing_links:
-                    print(f"固定 Skipping (Already Processed): {job['title']}")
+                    print(f"⏭️ Skipping (Already Processed): {job['title']}")
                     continue
                 
                 print(f"\n🟢 New Job Found! Navigating to details: {job['title']}")
-                
                 page.goto(job['link'], wait_until="networkidle", timeout=20000)
                 internal_html = page.content()
                 internal_soup = BeautifulSoup(internal_html, 'html.parser')
                 
-                description = internal_soup.get_text()
+                # Tries to isolate the real description content to send clean text to the AI
+                main_content = internal_soup.find('div', class_='job-description') or internal_soup.find('main')
+                if main_content:
+                    description = main_content.get_text(separator="\n").strip()
+                else:
+                    description = internal_soup.get_text().strip()
                 
-                company = "Remotar Partner"
+                # Tries to parse the company name from the meta description
+                company = "Remotar"
                 meta_desc = internal_soup.find('meta', property='og:description')
                 if meta_desc:
                     meta_text = meta_desc['content']
@@ -87,10 +84,10 @@ def fetch_remotar_junior_jobs():
                 )
                 processed_count += 1
                 
-                print("💤 Sleeping for 4 seconds to respect Gemini API rate limits...")
-                time.sleep(15)
+                print("💤 Sleeping for 5 seconds to respect Gemini API rate limits...")
+                time.sleep(5)
                 
-            print(f"\n📊 Scraping finished. Total NEW jobs sent to pipeline: {processed_count}")
+            print(f"\n📊 Scraping finished. Total new jobs sent to pipeline: {processed_count}")
             
         except Exception as e:
             print(f"⚠️ An error occurred during page processing: {e}")
