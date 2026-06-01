@@ -1,7 +1,30 @@
 {
   "candidate_name": "John Doe",
-  "seniority_focus": "Senior level positions or higher",
+  "seniority_focus": "Mid level positions or higher",
   "max_years_experience": 8,
   "desired_stacks": ["Java", "C#", "Python"],
-  "min_match_score": 65
+  "min_match_score": 65,
+  "past_experiences": [
+    {
+      "company": "Company A",
+      "role": "Senior Developer",
+      "duration_months": 12,
+      "technologies": ["Node.js", "React", "MySQL"],
+      "description": [
+        "Developing web applications using Node.js and React.",
+        "Participating in projects for integration with external APIs.",
+        "Collaborating with multidisciplinary teams for solution delivery."
+      ]
+    },
+    {
+      "company": "Company B",
+      "role": "Mid Level Developer",
+      "duration_months": 6,
+      "technologies": ["Python", "Django", "PostgreSQL"],
+      "description": [
+        "Participating in development projects using Python and Django.",
+        "Working in teams to implement features and maintain systems."
+      ]
+    }
+  ]
 }

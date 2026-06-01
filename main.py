@@ -15,12 +15,12 @@ def load_user_config() -> dict:
     """
     config_path = "config.json"
     
-    # 1ª Try: Looks for local file (Development Environment)
+    # 1st Try: Looks for local file (Development Environment)
     if os.path.exists(config_path):
         with open(config_path, "r", encoding="utf-8") as f:
             return json.load(f)
             
-    # 2ª Try: Looks for environment variable (GitHub Actions / Production)
+    # 2nd Try: Looks for environment variable (GitHub Actions / Production)
     env_config = os.environ.get("USER_CONFIG_JSON")
     if env_config:
         return json.loads(env_config)
@@ -51,7 +51,7 @@ def get_google_sheets_client():
     return gspread.authorize(credentials)
 
 def analyze_job_position(title: str, description: str, config: dict) -> dict:
-    """Analyzes the job description based on dynamic user configuration."""
+    """Analyzes the job description based on a highly structured history of past experiences."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("⚠️ GEMINI_API_KEY environment variable not found.")
@@ -62,30 +62,53 @@ def analyze_job_position(title: str, description: str, config: dict) -> dict:
     # Turns the list of stacks from the JSON into readable text for the prompt
     stacks_str = ", ".join(config.get("desired_stacks", []))
     
+    # Builds a readable and structured text block of the candidate's professional history for the prompt
+    past_experiences_blocks = []
+    for exp in config.get("past_experiences", []):
+        techs = ", ".join(exp.get("technologies", []))
+        bullets = "\n".join([f"  - {b}" for b in exp.get("description", [])])
+        
+        block = (
+            f"• Company: {exp.get('company')}\n"
+            f"  Role: {exp.get('role')} ({exp.get('duration_months')} months)\n"
+            f"  Technologies Used: {techs}\n"
+            f"  Original Activities:\n{bullets}"
+        )
+        past_experiences_blocks.append(block)
+        
+    past_experiences_formatted = "\n\n".join(past_experiences_blocks)
+    
     prompt = f"""
     Você é um recrutador técnico especialista e sistema de triagem ATS. 
-    Avalie a compatibilidade da vaga de TI abaixo de acordo com as preferências do candidato.
+    Avalie a compatibilidade da vaga de TI abaixo e adapte o histórico profissional do candidato para dar o máximo de match.
     
-    DIRETRIZES DO CANDIDATO:
+    DADOS DO CANDIDATO ATUAL:
     - Nome do Candidato: {config.get('candidate_name')}
     - Tecnologias de Interesse: {stacks_str}
     - Foco de Senioridade: {config.get('seniority_focus')}
-    - Limite de Experiência Exigida pela Vaga: Máximo de {config.get('max_years_experience')} anos.
+    - Limite de Experiência Exigida: Máximo de {config.get('max_years_experience')} anos.
+    
+    HISTÓRICO PROFISSIONAL REAL DO CANDIDATO (Matéria-prima obrigatória):
+    {past_experiences_formatted}
 
     REGRAS DE VALIDAÇÃO:
-    - Se a vaga exigir tecnologias principais totalmente fora da lista de interesse informada, defina 'is_valid_match' como false.
-    - Se o título ou a descrição exigir uma senioridade maior que a configurada (ex: Pleno sênior, Especialista, Lead), defina 'is_valid_match' como false.
+    - Se a vaga exigir tecnologias principais totalmente fora da lista de interesse informada, defina 'is_valid_match' as false.
+    - Se a vaga exigir uma senioridade maior que a configurada (ex: Pleno sênior, Especialista, Lead), defina 'is_valid_match' as false.
 
     Vaga: {title}
     Descrição Bruta: {clean_desc}
 
     Gere uma resposta estritamente em formato JSON com os seguintes campos:
-    - is_valid_match (boolean): true se a vaga estiver dentro do escopo de tecnologias e senioridade do candidato.
+    - is_valid_match (boolean): true se a vaga estiver dentro do escopo.
     - score (int): nota de compatibilidade real de 0 a 100 baseado no nível configurado.
-    - adapted_summary (string): O resumo do candidato adaptado para o foco dessa vaga específica usando o nome do candidato.
+    
+    - adapted_summary (string): Escreva um resumo profissional magnético focado para essa vaga, destacando as stacks que você domina que deem match com ela.
+    
     - adapted_skills (string): Palavras-chave das tecnologias exigidas na vaga separadas por vírgula.
+    
     - job_requirements (string): Um resumo estruturado e DETALHADO da descrição da vaga (atividades do dia a dia e pré-requisitos técnicos obrigatórios).
-    - tailored_experiences (string): 3 a 4 bullet points profissionais prontos simulando match com a vaga usando o nome do candidato.
+    
+    - tailored_experiences (string): Pegue cada uma das empresas do 'HISTÓRICO PROFISSIONAL REAL' e reescreva os bullet points originais de suas atividades. Você deve adequar a escrita técnica dessas strings originais para destacar as necessidades, termos de engenharia e stacks dessa nova vaga (mantenha a verdade dos fatos e mantenha a separação por empresa, apenas eleve o tom técnico e o foco).
     """
 
     response_schema = {
@@ -119,7 +142,7 @@ def analyze_job_position(title: str, description: str, config: dict) -> dict:
             
         except (ServerError, APIError) as e:
             if "503" in str(e) or "UNAVAILABLE" in str(e):
-                print(f"⚠️ [Tentativa {attempt + 1}/{max_retries}] Gemini instável. Aguardando {delay}s...")
+                print(f"⚠️ [Attempt {attempt + 1}/{max_retries}] Gemini unstable. Waiting {delay}s...")
                 time.sleep(delay)
                 delay *= 2
             else:
