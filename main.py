@@ -1,13 +1,36 @@
 import os
 import json
 import time
-from datetime import datetime
-import traceback
 import gspread
+from datetime import datetime
 from google.oauth2.service_account import Credentials
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ServerError
+
+def load_user_config() -> dict:
+    """Loads candidate preferences from local config.json or GitHub Environment Variables.
+    
+    Fails explicitly if no configuration source is found.
+    """
+    config_path = "config.json"
+    
+    # 1ª Try: Looks for local file (Development Environment)
+    if os.path.exists(config_path):
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+            
+    # 2ª Try: Looks for environment variable (GitHub Actions / Production)
+    env_config = os.environ.get("USER_CONFIG_JSON")
+    if env_config:
+        return json.loads(env_config)
+        
+    # If neither source is found, explicitly raise an error informing the user
+    raise FileNotFoundError(
+        "❌ Critical Error: User settings not found!\n"
+        "Make sure the 'config.json' file exists locally or that the "
+        "environment variable 'USER_CONFIG_JSON' is set in the execution environment."
+    )
 
 def get_google_sheets_client():
     """Authenticates with Google API using the JSON string from environment variables or local file."""
@@ -27,30 +50,44 @@ def get_google_sheets_client():
         
     return gspread.authorize(credentials)
 
-def analyze_job_position(title: str, description: str) -> dict:
-    """Analyzes the job description against Gabriel's profile using Gemini 2.5 Flash with Retry logic."""
+def analyze_job_position(title: str, description: str, config: dict) -> dict:
+    """Analyzes the job description based on dynamic user configuration."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("⚠️ GEMINI_API_KEY environment variable not found.")
         
     gemini_client = genai.Client(api_key=api_key)
+    clean_desc = description[:9000] if description else ""
+    
+    # Turns the list of stacks from the JSON into readable text for the prompt
+    stacks_str = ", ".join(config.get("desired_stacks", []))
     
     prompt = f"""
-    Você é um especialista em recrutamento técnico e ATS. Analise a vaga abaixo e compare com o perfil do Gabriel (Desenvolvedor Fullstack Node/TS/Python).
+    Você é um recrutador técnico especialista e sistema de triagem ATS. 
+    Avalie a compatibilidade da vaga de TI abaixo de acordo com as preferências do candidato.
     
+    DIRETRIZES DO CANDIDATO:
+    - Nome do Candidato: {config.get('candidate_name')}
+    - Tecnologias de Interesse: {stacks_str}
+    - Foco de Senioridade: {config.get('seniority_focus')}
+    - Limite de Experiência Exigida pela Vaga: Máximo de {config.get('max_years_experience')} anos.
+
+    REGRAS DE VALIDAÇÃO:
+    - Se a vaga exigir tecnologias principais totalmente fora da lista de interesse informada, defina 'is_valid_match' como false.
+    - Se o título ou a descrição exigir uma senioridade maior que a configurada (ex: Pleno sênior, Especialista, Lead), defina 'is_valid_match' como false.
+
     Vaga: {title}
-    Descrição Bruta: {description}
+    Descrição Bruta: {clean_desc}
 
     Gere uma resposta estritamente em formato JSON com os seguintes campos:
-    - is_valid_match (boolean): true se for uma vaga Júnior relevante para o perfil do Gabriel.
-    - score (int): nota de compatibilidade de 0 a 100.
-    - adapted_summary (string): O resumo profissional do Gabriel adaptado para esta vaga.
-    - adapted_skills (string): As palavras-chave de tecnologia separadas por vírgula para passar no ATS.
-    - job_requirements (string): Um resumo curto e direto (em até 4 tópicos com bullet points) dos requisitos técnicos reais exigidos pela vaga.
-    - tailored_experiences (string): Gere de 3 a 4 bullet points profissionais prontos, simulando as experiências anteriores do Gabriel, mas usando os termos e conquistas que dão mais match com os requisitos dessa vaga específica.
+    - is_valid_match (boolean): true se a vaga estiver dentro do escopo de tecnologias e senioridade do candidato.
+    - score (int): nota de compatibilidade real de 0 a 100 baseado no nível configurado.
+    - adapted_summary (string): O resumo do candidato adaptado para o foco dessa vaga específica usando o nome do candidato.
+    - adapted_skills (string): Palavras-chave das tecnologias exigidas na vaga separadas por vírgula.
+    - job_requirements (string): Um resumo estruturado e DETALHADO da descrição da vaga (atividades do dia a dia e pré-requisitos técnicos obrigatórios).
+    - tailored_experiences (string): 3 a 4 bullet points profissionais prontos simulando match com a vaga usando o nome do candidato.
     """
 
-    # Definindo o esquema de validação estrito para o Gemini não errar o JSON
     response_schema = {
         "type": "OBJECT",
         "properties": {
@@ -65,7 +102,7 @@ def analyze_job_position(title: str, description: str) -> dict:
     }
 
     max_retries = 3
-    delay = 5  # Tempo inicial de espera em segundos
+    delay = 5
 
     for attempt in range(max_retries):
         try:
@@ -75,61 +112,66 @@ def analyze_job_position(title: str, description: str) -> dict:
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=response_schema,
-                    temperature=0.3
+                    temperature=0.2
                 ),
             )
-            # Se a chamada der certo, decodifica e retorna o resultado saindo da função
             return json.loads(response.text)
             
         except (ServerError, APIError) as e:
-            # Captura erros 503 (Servidor em alta demanda) ou indisponibilidade da API da Google
             if "503" in str(e) or "UNAVAILABLE" in str(e):
-                print(f"⚠️ [Tentativa {attempt + 1}/{max_retries}] Gemini instável (Erro 503). Aguardando {delay}s antes de tentar novamente...")
+                print(f"⚠️ [Tentativa {attempt + 1}/{max_retries}] Gemini instável. Aguardando {delay}s...")
                 time.sleep(delay)
-                delay *= 2  # Aplica o Backoff Exponencial (dobra o tempo de espera)
+                delay *= 2
             else:
-                # Se for outro tipo de erro (como erro 400 ou chave inválida), não adianta tentar novamente
                 raise e
 
-    # Se sair do loop de repetição sem retornar, significa que esgotou as tentativas
-    raise RuntimeError("❌ Não foi possível obter resposta do Gemini após múltiplas tentativas devido à alta demanda nos servidores da Google.")
+    raise RuntimeError("❌ Unable to get response from Gemini after multiple attempts.")
 
 def process_and_save_job(title: str, company: str, link: str, description: str):
-    """Analyzes the job and saves the data into Google Sheets if it's a good match."""
+    """Analyzes the job and saves the data into Google Sheets if it matches config criteria."""
     try:
-        analysis = analyze_job_position(title, description)
+        # Load dynamic user configuration (Local file or GitHub Environment Variable)
+        config = load_user_config()
         
-        if not analysis.get("is_valid_match") or analysis.get("score", 0) < 70:
-            print(f"❌ Job skipped (Low match score or wrong seniority). Score: {analysis.get('score')}%")
+        # Pass the configuration dictionary to the Gemini analysis function
+        analysis = analyze_job_position(title, description, config)
+        
+        raw_score = analysis.get("score", 0)
+        try:
+            score = int(raw_score.replace("%", "").strip()) if isinstance(raw_score, str) else int(raw_score)
+        except Exception:
+            score = 0
+            
+        is_valid = bool(analysis.get("is_valid_match", False))
+        min_acceptable_score = config.get("min_match_score", 65)
+        
+        # Filter based on dynamic JSON value
+        if not is_valid or score < min_acceptable_score:
+            print(f"❌ Job discarded (Outside defined criteria). Title: {title} | Score: {score}%")
             return
 
-        print(f"🎯 Great match found! Score: {analysis.get('score')}%. Connecting to Google Sheets...")
+        print(f"🎯 Compatible job found! Score: {score}%. Saving to spreadsheet...")
         
         sheets_client = get_google_sheets_client()
         spreadsheet = sheets_client.open("jobs").sheet1
         
         current_date = datetime.now().strftime("%d/%m/%Y %H:%M")
         
-        # Mapeamento exato batendo com as colunas A até J da sua planilha
         row_data = [
-            current_date,                         # A: Date
-            title,                                # B: Title
-            company,                              # C: Company
-            link,                                 # D: Link
-            int(analysis.get("score")),           # E: Score
-            "Pending",                            # F: Status
-            analysis.get("adapted_summary"),      # G: Adapted_Summary
-            analysis.get("adapted_skills"),       # H: Adapted_Skills
-            analysis.get("job_requirements"),     # I: Job_Requirements (Nova)
-            analysis.get("tailored_experiences")  # J: Tailored_Experiences (Nova)
+            current_date,
+            title,
+            company,
+            link,
+            score,
+            "Pending",
+            analysis.get("adapted_summary"),
+            analysis.get("adapted_skills"),
+            analysis.get("job_requirements"),
+            analysis.get("tailored_experiences")
         ]
         
         spreadsheet.append_row(row_data, value_input_option="USER_ENTERED")
-        print("💾 Data successfully saved to Google Sheets!")
+        print("💾 Saved successfully to Google Sheets!")
         
     except Exception as e:
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            print("⏳ [Rate Limit] Gemini API free tier limit reached. Skipping position to avoid crash...")
-        else:
-            print(f"⚠️ An error occurred while processing the job: {e}")
-            traceback.print_exc()
+        print(f"⚠️ Error processing job: {e}")

@@ -1,0 +1,7 @@
+{
+  "candidate_name": "John Doe",
+  "seniority_focus": "Senior level positions or higher",
+  "max_years_experience": 8,
+  "desired_stacks": ["Java", "C#", "Python"],
+  "min_match_score": 65
+}

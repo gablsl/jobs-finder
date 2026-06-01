@@ -29,6 +29,7 @@ jobs:
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        USER_CONFIG_JSON: ${{ secrets.USER_CONFIG_JSON }}
       run: python scraper.py
 
     - name: Send Daily Report Email
