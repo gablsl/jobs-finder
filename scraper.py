@@ -88,7 +88,7 @@ def fetch_remotar_junior_jobs():
                 processed_count += 1
                 
                 print("💤 Sleeping for 4 seconds to respect Gemini API rate limits...")
-                time.sleep(4)
+                time.sleep(15)
                 
             print(f"\n📊 Scraping finished. Total NEW jobs sent to pipeline: {processed_count}")
             
