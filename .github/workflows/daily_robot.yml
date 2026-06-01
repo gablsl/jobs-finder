@@ -2,9 +2,8 @@ name: Daily Tech Jobs Automation
 
 on:
   schedule:
-    # Runs everyday at 09:00 AM UTC (06:00 AM Brasília Time)
-    - cron: '0 9 * * *'
-  workflow_dispatch: # Allows you to trigger it manually from the GitHub website
+    - cron: '0 12 * * *'
+  workflow_dispatch:
 
 jobs:
   run-automation:
@@ -34,6 +33,8 @@ jobs:
 
     - name: Send Daily Report Email
       env:
-        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+        GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+        RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
       run: python email_sender.py
