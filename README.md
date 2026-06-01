@@ -100,6 +100,7 @@ export GEMINI_API_KEY="your_api_key"
 export SENDER_EMAIL="your_email@gmail.com"
 export RECEIVER_EMAIL="your_email@gmail.com"
 export GMAIL_APP_PASSWORD="your_app_password"
+export SPREADSHEET_NAME="your_spreadsheet_name"
 
 python scraper.py
 python email_sender.py
@@ -121,6 +122,7 @@ To make this pipeline run completely automatically every day, you need to add yo
 | `RECEIVER_EMAIL` | The email address receiving the report |
 | `GOOGLE_CREDENTIALS_JSON` | The entire content of your `google_credentials.json` file |
 | `USER_CONFIG_JSON` | The entire content of your `config.json` profile file |
+| `SPREADSHEET_NAME` | The name of sheet in Google Sheet |
 
 ---
 

@@ -10,7 +10,8 @@ def clean_old_jobs(days_to_keep=7):
     print(f"\n🧹 Starting database cleanup (removing jobs older than {days_to_keep} days)...")
     try:
         sheets_client = get_google_sheets_client()
-        spreadsheet = sheets_client.open("jobs").sheet1
+        sheet_name = os.environ.get("SPREADSHEET_NAME")
+        spreadsheet = sheets_client.open(sheet_name).sheet1
         all_rows = spreadsheet.get_all_values()
         if len(all_rows) <= 1:
             return
@@ -40,7 +41,8 @@ def send_daily_report():
     print("📧 Connecting to Google Sheets to check for pending report jobs...")
     try:
         sheets_client = get_google_sheets_client()
-        spreadsheet = sheets_client.open("jobs").sheet1
+        sheet_name = os.environ.get("SPREADSHEET_NAME")
+        spreadsheet = sheets_client.open(sheet_name).sheet1
         all_rows = spreadsheet.get_all_values()
         if len(all_rows) <= 1:
             print("💤 No jobs found in the spreadsheet.")

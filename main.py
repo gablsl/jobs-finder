@@ -176,7 +176,8 @@ def process_and_save_job(title: str, company: str, link: str, description: str):
         print(f"🎯 Compatible job found! Score: {score}%. Saving to spreadsheet...")
         
         sheets_client = get_google_sheets_client()
-        spreadsheet = sheets_client.open("jobs").sheet1
+        sheet_name = os.environ.get("SPREADSHEET_NAME")
+        spreadsheet = sheets_client.open(sheet_name).sheet1
         
         current_date = datetime.now().strftime("%d/%m/%Y %H:%M")
         

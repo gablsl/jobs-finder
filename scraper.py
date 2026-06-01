@@ -1,3 +1,4 @@
+import os
 import time
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -8,7 +9,8 @@ def get_already_processed_links():
     try:
         print("📊 Connecting to Google Sheets to check existing jobs...")
         sheets_client = get_google_sheets_client()
-        spreadsheet = sheets_client.open("jobs").sheet1
+        sheet_name = os.environ.get("SPREADSHEET_NAME")
+        spreadsheet = sheets_client.open(sheet_name).sheet1
         links = spreadsheet.col_values(4)
         if links and links[0] == "Link":
             links.pop(0)
