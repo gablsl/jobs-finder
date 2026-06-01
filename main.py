@@ -130,7 +130,7 @@ def analyze_job_position(title: str, description: str, config: dict) -> dict:
     for attempt in range(max_retries):
         try:
             response = gemini_client.models.generate_content(
-                model='gemini-2.5-flash-8b',
+                model='gemini-2.5-flash-lite',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
