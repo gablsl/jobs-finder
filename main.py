@@ -1,11 +1,13 @@
 import os
 import json
+import time
 from datetime import datetime
 import traceback
 import gspread
 from google.oauth2.service_account import Credentials
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError, ServerError
 
 def get_google_sheets_client():
     """Authenticates with Google API using the JSON string from environment variables or local file."""
@@ -26,7 +28,7 @@ def get_google_sheets_client():
     return gspread.authorize(credentials)
 
 def analyze_job_position(title: str, description: str) -> dict:
-    """Analyzes the job description against Gabriel's profile using Gemini 2.5 Flash."""
+    """Analyzes the job description against Gabriel's profile using Gemini 2.5 Flash with Retry logic."""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("⚠️ GEMINI_API_KEY environment variable not found.")
@@ -62,17 +64,35 @@ def analyze_job_position(title: str, description: str) -> dict:
         "required": ["is_valid_match", "score", "adapted_summary", "adapted_skills", "job_requirements", "tailored_experiences"]
     }
 
-    response = gemini_client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=response_schema,
-            temperature=0.3
-        ),
-    )
-    
-    return json.loads(response.text)
+    max_retries = 3
+    delay = 5  # Tempo inicial de espera em segundos
+
+    for attempt in range(max_retries):
+        try:
+            response = gemini_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=response_schema,
+                    temperature=0.3
+                ),
+            )
+            # Se a chamada der certo, decodifica e retorna o resultado saindo da função
+            return json.loads(response.text)
+            
+        except (ServerError, APIError) as e:
+            # Captura erros 503 (Servidor em alta demanda) ou indisponibilidade da API da Google
+            if "503" in str(e) or "UNAVAILABLE" in str(e):
+                print(f"⚠️ [Tentativa {attempt + 1}/{max_retries}] Gemini instável (Erro 503). Aguardando {delay}s antes de tentar novamente...")
+                time.sleep(delay)
+                delay *= 2  # Aplica o Backoff Exponencial (dobra o tempo de espera)
+            else:
+                # Se for outro tipo de erro (como erro 400 ou chave inválida), não adianta tentar novamente
+                raise e
+
+    # Se sair do loop de repetição sem retornar, significa que esgotou as tentativas
+    raise RuntimeError("❌ Não foi possível obter resposta do Gemini após múltiplas tentativas devido à alta demanda nos servidores da Google.")
 
 def process_and_save_job(title: str, company: str, link: str, description: str):
     """Analyzes the job and saves the data into Google Sheets if it's a good match."""
