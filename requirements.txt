@@ -1,15 +1,8 @@
-# --- Web Scraping & Automation ---
-beautifulsoup4==4.12.3
-requests==2.32.3
-playwright==1.49.1
-
-# --- Google Sheets API Integration ---
-gspread==6.1.2
-google-auth==2.35.0
-
-# --- AI & LLM Engine (Google GenAI) ---
-google-genai==0.1.1
-tenacity==9.0.0
-
-# --- Environment Variables ---
-python-dotenv==1.0.1
+beautifulsoup4==4.14.3
+requests==2.34.2
+playwright==1.60.0
+gspread==6.2.1
+google-auth==2.53.0
+google-genai==2.8.0
+tenacity==9.1.4
+python-dotenv==1.2.2
